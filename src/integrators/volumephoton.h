@@ -12,9 +12,9 @@
 class VolumePhotonIntegrator : public VolumeIntegrator
 {
 public:
-	VolumePhotonIntegrator(int ncaus, int nindir, int nLookup, int mdepth,
-			 float maxdist, bool finalGather, int gatherSamples,
-			 float rrt, float ga);
+	VolumePhotonIntegrator(int nvol, int nLookup, int maxspecdepth,
+		int maxphotondepth, float maxdist, bool finalGather, 
+		int gatherSamples, float ga, float ss);
 	~VolumePhotonIntegrator();
 
 	void RequestSamples(Sampler *sampler, Sample *sample, const Scene *scene);
@@ -30,11 +30,22 @@ public:
             const Renderer *renderer);
 
 private:
+	friend class PhotonShootingTask;	
 
+	uint32_t nVolumePhotonsWanted, nLookup;
+	int maxSpecularDepth, maxPhotonDepth;
+	float maxDistSquared;
+	bool finalGather;
+	int gatherSamples;
+	float cosGatherAngle;
+
+	float stepSize;
+	int tauSampleOffset, scatterSampleOffset;
+
+	//KdTree<Photon> *volumeMap;
 };
 
-
-
+//VolumePhotonIntegrator *CreateVolumePhotonMapSurfaceIntegrator(const ParamSet &params);
 
 
 #endif //VOLUMEPHOTON_H
