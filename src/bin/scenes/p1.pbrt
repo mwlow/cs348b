@@ -1,0 +1,77 @@
+#
+# The following lines define the size of the output image and the name of
+# of the file containing the result of rendering
+#
+Film "image" "string filename" ["pearls.exr"]
+	"integer xresolution" [800] "integer yresolution" [800]
+
+Sampler "lowdiscrepancy" "integer pixelsamples" [1] # [4] # [1]
+
+PixelFilter "box"
+
+#SurfaceIntegrator "directlighting" "integer maxdepth" [10]
+SurfaceIntegrator "dipolesubsurface" "float minsampledistance" [3]
+#SurfaceIntegrator "" "integer maxdepth" [10]
+
+#
+# Camera configuration
+#
+LookAt 200 250 70   0 33 -50   0 0 1
+Camera "perspective" "float fov" [45]
+
+#
+# Light source
+#
+WorldBegin
+  AttributeBegin
+  Material "matte" "color Kd" [0 0 0]
+  AreaLightSource "area"  "color L" [10 10 10] "integer nsamples" [2]
+  Translate 0 0 800
+  ReverseOrientation
+  Shape "disk" "float radius" [300]
+AttributeEnd
+
+#
+# Light gray backdrop
+# 
+AttributeBegin
+  Material "matte" "color Kd" [.75 .75 .75]
+  Translate 0 0 -140
+Shape "trianglemesh" "point P" [ -400 -400 0 400 -400 0 400 400 0 -400 400 0 ]
+      "float uv" [ 0 0 5 0 5 5 0 5 ]
+	"integer indices" [ 0 1 2 2 3 0]
+Shape "trianglemesh" "point P" [ -400 -400 0 400 -400 0 
+	400 -400  1000 -400 -400 1000 ]
+      "float uv" [ 0 0 5 0 5 5 0 5 ]
+	"integer indices" [ 0 1 2 2 3 0]
+Shape "trianglemesh" "point P" [ -400 -400 0 -400 400 0  -400 400 1000 -400 -400 1000 ]
+      "float uv" [ 0 0 5 0 5 5 0 5 ]
+	"integer indices" [ 0 1 2 2 3 0]
+Shape "trianglemesh" "point P" [ -400 400 0 400 400 0 
+	400 400  1000 -400 400 1000 ]
+      "float uv" [ 0 0 5 0 5 5 0 5 ]
+	"integer indices" [ 0 1 2 2 3 0]
+Shape "trianglemesh" "point P" [ 400 -400 0 400 400 0  400 400 1000 400 -400 1000 ]
+      "float uv" [ 0 0 5 0 5 5 0 5 ]
+	"integer indices" [ 0 1 2 2 3 0]
+AttributeEnd
+
+#
+# Pearls
+#
+AttributeBegin
+    Material "pearl" "color Kd" [0.8 0.1 0.8] "color Kr" [.9 .5 .9]
+        "float meanfreepath" [5]
+    # Material "pearl" "color Kd" [0.8 0.8 0.8] "color Ks" [.9 .9 .9] "color Ki" [.02 .02 .02]
+Translate 0 -100 -70
+Shape "sphere" "float radius" [70]
+
+#    Material "pearl" "color Kd" [0.8 0.1 0.8] "color Ks" [.9 .5 .9] "color Ki" [.04 .04 .04] "float d" [700]
+    Material "substrate" "color Kd" [0.8 0.1 0.8] "color Kr" [.9 .5 .9]
+    #Material "pearl" "color Kd" [0.8 0.1 0.8] "color Kr" [.9 .5 .9]
+    #    "float meanfreepath" [5]
+    # Material "pearl" "color Kd" [0.8 0.1 0.8] "color Ks" [.9 .5 .9] "color Ki" [.04 .04 .04]
+Translate -130 125 0
+Shape "sphere" "float radius" [70]
+AttributeEnd
+WorldEnd

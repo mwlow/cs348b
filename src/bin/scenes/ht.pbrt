@@ -1,0 +1,133 @@
+###############################################################################
+#
+# The following lines define the size of the output image and the name of
+# of the file containing the result of rendering
+#
+Film "image" "string filename" ["ht.exr"]
+	"integer xresolution" [400] "integer yresolution" [300] 
+
+#
+# Sampling specification: PBRT will shoot 2 samples rays per pixel.
+# Increasing the number of samples per pixel will increase image quality
+# at the cost of increased rendering time.  Feel free to crank this value
+# up in your final images.
+#
+
+Sampler "lowdiscrepancy" "integer pixelsamples" [4]
+
+Include "camera.pbrt"
+
+#SurfaceIntegrator "photonmap" "integer nused" [25] "bool finalgather" ["false"]
+#	"float maxdist" [1.5] "integer indirectphotons" [0]
+#	"integer causticphotons" [500000]
+
+#VolumeIntegrator "single" "float stepsize" [.05]
+#VolumeIntegrator "volumetricPhoton" "integer nused" [25]
+#	"float maxdist" [1.5] "integer volumephotons" [500000]  "float scalefactor" [13] 
+#SurfaceIntegrator "dipolesubsurface" "string pointsfile" "points.out"   "float maxerror" [.05]
+Renderer "sampler"
+
+
+WorldBegin
+
+AttributeBegin
+LightSource "spot" "point from" [3 10 3] "point to" [0 0 0]
+#	"color I" [60000 60000 60000] "float coneangle" [3]
+	"color I" [1000 1000 1000] "float coneangle" [1.2] 
+
+LightSource "spot" "point from" [4 10 3] "point to" [1 0 0]
+#    "color I" [60000 60000 60000] "float coneangle" [3]
+    "color I" [1000 1000 1000] "float coneangle" [1.2]
+
+LightSource "spot" "point from" [4 10 4] "point to" [1 0 1]
+#    "color I" [60000 60000 60000] "float coneangle" [3]
+    "color I" [1000 1000 1000] "float coneangle" [1.2] 
+
+LightSource "spot" "point from" [3 10 4] "point to" [0 0 1]
+#    "color I" [60000 60000 60000] "float coneangle" [3]
+    "color I" [1000 1000 1000] "float coneangle" [1.2] 
+#LightSource "distant" "point from" [0 0 0] "point to" [1 -1 0]
+#    "spectrum L" [400 400 400]
+#	"color I" [500 500 500] "float coneangle" [10]
+AttributeEnd
+
+AttributeBegin
+#  AreaLightSource "area" "color L" [100 100 100] "integer nsamples" [4]
+#  AreaLightSource "area" "color L" [300 300 300] "integer nsamples" [4]
+#  Translate 8 13 0
+  AreaLightSource "area" "color L" [5 5 5] "integer nsamples" [4]
+  Translate 0 15 0
+  Rotate 90 1 0 0
+#  Shape "disk" "float radius" [3]
+  Shape "disk" "float radius" [3]
+AttributeEnd
+
+Texture "tmap" "color" "imagemap" "string filename" "tex/06_D.tga"
+	"float uscale" 1 "float vscale" 1
+Texture "tbump-tex" "float" "imagemap" "string filename" "tex/06_B.tga"
+	"float uscale" 1 "float vscale" 1 
+Texture "sbump" "float" "scale" "texture tex1" "tbump-tex"
+	"float  tex2" [-.25]
+Texture "tfloor" "color" "imagemap" "string filename" "tex/beach_sand.tga"
+
+# should be realistic scattering/absportion coefficient, http://www.d-a-instruments.com/light_absorption.html
+#Volume "homogeneous"   "color sigma_a" [0.5 0.05 0.02]     "color sigma_s" [0.005 0.005 0.005]
+#	"point p0" [-6 -1 -6] "point p1" [6 4 6]
+
+
+AttributeBegin
+Texture "pearlTex" "color" "imagemap" "string filename" ["tex/pearl.tga"]
+Texture "smap" "color" "scale" "texture tex1" "pearlTex"   "color tex2" [.9 .9 .9]
+Texture "pearlTexS" "color" "imagemap" "string filename" ["tex/pearl_s.tga"]
+
+
+Material "pearl" 
+    #"color Kd" [0.8 0.8 0.8] 
+    "texture Kd" ["pearlTex"] 
+    "color Kr" [.3 .3 .3]
+    "float meanfreepath" [6] "float index" [1.65]
+    "float vroughness" [0.04] "float uroughness" [0.04]
+    "float dist" [310] 
+
+Translate 0.267 1.586 1.433
+Rotate 120 1 0 0
+Scale 0.05 0.05 0.05
+Shape "sphere"
+#Include "model/pearl.pbrt"
+AttributeEnd
+
+AttributeBegin
+Texture "SandTex"     "color" "imagemap" "string filename" ["tex/beach_sand.tga"]
+	"float uscale" [4.0] "float vscale" [4.0]
+Texture "SandBumpTex" "float" "imagemap" "string filename" ["tex/sand_bump.tga"]
+	"float uscale" [4.0] "float vscale" [4.0]
+
+Texture "sbump" "float" "scale" "texture tex1" "SandBumpTex"
+	"float  tex2" [0.003]
+Material "matte"    "texture Kd" "SandTex"   "texture bumpmap" "sbump"
+Include "model/floor.pbrt"
+AttributeEnd
+
+
+AttributeBegin
+Translate -6 4 -6
+
+#Texture "water" "float" "imagemap" "string filename" "tex/surface.tga"
+#	"float uscale" [1] "float vscale" [1]
+#Texture "modwater" "float" "scale" "texture tex1" "water" "float tex2" [1]
+
+#Material "glass" "float index" [1.33] "texture bumpmap" "modwater"
+#Material "glass" "float index" [1.33]
+Material "matte" "float index" [1.33]
+
+#Shape "trianglemesh" "point P" [-1 0 -1   1 0 -1   1 0 1   -1 0 1 ] "normal N" [0 1 0   0 1 0   0 1 0    0 1 0]
+#    "float uv" [0 0   1 0    1 1    0 1]  "integer indices" [0 1 2    2 3 0]
+#Scale 0.3 0.2 0.3
+#Include "model/surface.pbrt"
+Rotate 90 1 0 0
+Scale 16 16 1.1
+#Include "tex/sea-l.pbrt"
+Include "tex/map2.pbrt"
+AttributeEnd
+
+WorldEnd
