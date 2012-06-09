@@ -41,6 +41,7 @@
 #include "cameras/environment.h"
 #include "cameras/orthographic.h"
 #include "cameras/perspective.h"
+#include "cameras/realistic.h"
 #include "film/image.h"
 #include "filters/box.h"
 #include "filters/gaussian.h"
@@ -116,6 +117,7 @@
 #include "volumes/exponential.h"
 #include "volumes/homogeneous.h"
 #include "volumes/volumegrid.h"
+#include "integrators/volumephotonmap.h"
 #include <map>
  #if (_MSC_VER >= 1400)
  #include <stdio.h>
@@ -515,6 +517,7 @@ VolumeRegion *MakeVolumeRegion(const string &name,
         vr = CreateGridVolumeRegion(volume2world, paramSet);
     else if (name == "exponential")
         vr = CreateExponentialVolumeRegion(volume2world, paramSet);
+
     else
         Warning("Volume region \"%s\" unknown.", name.c_str());
     paramSet.ReportUnused();
@@ -561,7 +564,9 @@ VolumeIntegrator *MakeVolumeIntegrator(const string &name,
     if (name == "single")
         vi = CreateSingleScatteringIntegrator(paramSet);
     else if (name == "emission")
-        vi = CreateEmissionVolumeIntegrator(paramSet);
+        vi = CreateEmissionVolumeIntegrator(paramSet);	
+	else if (name == "volumetricPhoton")
+		vi = CreateVolumePhotonMapSurfaceIntegrator(paramSet);
     else
         Warning("Volume integrator \"%s\" unknown.", name.c_str());
     paramSet.ReportUnused();
@@ -603,6 +608,8 @@ Camera *MakeCamera(const string &name,
         camera = CreateOrthographicCamera(paramSet, animatedCam2World, film);
     else if (name == "environment")
         camera = CreateEnvironmentCamera(paramSet, animatedCam2World, film);
+    else if (name == "realistic")
+    	camera = CreateRealisticCamera(paramSet, animatedCam2World, film);
     else
         Warning("Camera \"%s\" unknown.", name.c_str());
     paramSet.ReportUnused();

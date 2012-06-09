@@ -241,7 +241,7 @@ public:
             if (fscanf(f, "%f ", &c[i]) != 1) return false;
         return true;
     }
-protected:
+//protected:
     // CoefficientSpectrum Protected Data
     float c[nSamples];
 };
