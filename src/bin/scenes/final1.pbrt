@@ -7,13 +7,13 @@ LookAt 3.3 2 -10  1.2 -0.5 0    0 1 0
 Camera "perspective" "float fov" [40]
 
 SurfaceIntegrator "photonmap" "integer nused" [200] "bool finalgather" ["false"]
-	"float maxdist" [1.5] "integer indirectphotons" [500000]
-	"integer causticphotons" [2000000]
+	"float maxdist" [1.5] "integer indirectphotons" [50000]
+	"integer causticphotons" [200000]
 
 
 VolumeIntegrator "volumetricPhoton" "integer nused" [25]
-	"float maxdist" [1.5] "integer volumephotons" [2000000]  "float scalefactor" [2]
-    "float stepsize" [0.05]
+	"float maxdist" [1.5] "integer volumephotons" [200000]  "float scalefactor" [2]
+    "float stepsize" [0.1]
 Renderer "sampler"
 
 WorldBegin
