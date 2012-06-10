@@ -1,0 +1,105 @@
+
+#row of 10 killeroos
+
+TransformBegin
+
+# killeroo 1
+TransformBegin
+Translate 0 7 0
+Scale 0.05 0.05 0.05
+Rotate -90 1 0 0
+Include "killeroo_subdiv0.pbrt"
+TransformEnd
+
+Translate 10 0 0
+
+# killeroo 2
+TransformBegin
+Translate 0 7 0
+Scale 0.05 0.05 0.05
+Rotate -90 1 0 0
+Include "killeroo_subdiv0.pbrt"
+TransformEnd
+
+Translate 10 0 0
+
+# killeroo 3
+TransformBegin
+Translate 0 7 0
+Scale 0.05 0.05 0.05
+Rotate -90 1 0 0
+Include "killeroo_subdiv0.pbrt"
+TransformEnd
+
+Translate 10 0 0
+
+# killeroo 4
+TransformBegin
+Translate 0 7 0
+Scale 0.05 0.05 0.05
+Rotate -90 1 0 0
+Include "killeroo_subdiv0.pbrt"
+TransformEnd
+
+Translate 10 0 0
+
+# killeroo 5
+TransformBegin
+Translate 0 7 0
+Scale 0.05 0.05 0.05
+Rotate -90 1 0 0
+Include "killeroo_subdiv0.pbrt"
+TransformEnd
+
+Translate 10 0 0
+
+# killeroo 7
+TransformBegin
+Translate 0 7 0
+Scale 0.05 0.05 0.05
+Rotate -90 1 0 0
+Include "killeroo_subdiv0.pbrt"
+TransformEnd
+
+Translate 10 0 0
+
+# killeroo 7
+TransformBegin
+Translate 0 7 0
+Scale 0.05 0.05 0.05
+Rotate -90 1 0 0
+Include "killeroo_subdiv0.pbrt"
+TransformEnd
+
+Translate 10 0 0
+
+# killeroo 8
+TransformBegin
+Translate 0 7 0
+Scale 0.05 0.05 0.05
+Rotate -90 1 0 0
+Include "killeroo_subdiv0.pbrt"
+TransformEnd
+
+Translate 10 0 0
+
+# killeroo 9
+TransformBegin
+Translate 0 7 0
+Scale 0.05 0.05 0.05
+Rotate -90 1 0 0
+Include "killeroo_subdiv0.pbrt"
+TransformEnd
+
+Translate 10 0 0
+
+# killeroo 10
+TransformBegin
+Translate 0 7 0
+Scale 0.05 0.05 0.05
+Rotate -90 1 0 0
+Include "killeroo_subdiv0.pbrt"
+TransformEnd
+
+TransformEnd
+

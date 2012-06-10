@@ -1,0 +1,69 @@
+
+Film "image" "string filename" ["manykilleroos.exr"]  "integer xresolution" [400] "integer yresolution" [400]
+
+Sampler "lowdiscrepancy" "integer pixelsamples" [1]
+Accelerator "kdtree"
+
+
+#
+# CS348B Note: Use the following LookAt declarations to render the
+# three versions of the scene for assignment 2
+#
+
+
+# Configuration 1: The entire scene from above
+#LookAt 10 120 -25  0 0 0   -.081 .976 .203
+
+
+# Configuration 2: Medium Range 
+ LookAt 19 19 -48   10.5 5 -23   0 1 0
+
+
+# Configuration 3: Close Up -- Near a killeroo head
+# LookAt 12 7 -34.5   6 8.5 -24   0 1 0
+
+
+
+Camera "perspective" "float fov" [38]
+
+
+WorldBegin
+
+#
+# The scene is lit by a single area light
+#
+
+AttributeBegin
+AreaLightSource "area" "color L" [200 200 200] "integer nsamples" [1]
+Translate 30 40 -60
+Shape "disk" "float radius" [6] 
+AttributeEnd
+
+
+#
+# The ground plane
+#
+
+AttributeBegin
+
+Texture "grid" "color" "imagemap" "string filename" ["lines.exr"] "float uscale" [8] "float vscale" [8]
+Texture "scaled_grid" "color" "scale" "texture tex1" "grid" "color tex2" [ .5 .5 .8 ]
+Material "matte" "texture Kd" "scaled_grid"
+
+Scale 100 100 100
+Rotate 90 1 0 0
+Shape "trianglemesh"     
+    "point P" [-1 -1 0  1 -1 0   1 1 0   -1 1 0 ]
+    "float uv" [0 0   1 0   1 1   0 1]
+    "integer indices" [ 0 2 1 0 3 2 ]
+
+AttributeEnd
+
+
+
+
+WorldEnd
+
+
+
+
