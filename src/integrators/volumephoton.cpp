@@ -20,7 +20,7 @@ struct Photon {
 };
 
 struct PhotonProcess {
-    // PhotonProcess Public Methods
+    // PhotonProcess Public Methods defined in photonmap.cpp
     PhotonProcess(uint32_t mp, ClosePhoton *buf);
     void operator()(const Point &p, const Photon &photon, float dist2,
          float &maxDistSquared);
@@ -40,31 +40,6 @@ struct ClosePhoton {
     const Photon *photon;
     float distanceSquared;
 };
-
-PhotonProcess::PhotonProcess(uint32_t mp, ClosePhoton *buf) {
-    photons = buf;
-    nLookup = mp;
-    nFound = 0;
-}
-
-inline void PhotonProcess::operator()(const Point &p,
-        const Photon &photon, float distSquared, float &maxDistSquared) {
-    if (nFound < nLookup) {
-        // Add photon to unordered array of photons
-        photons[nFound++] = ClosePhoton(&photon, distSquared);
-        if (nFound == nLookup) {
-            std::make_heap(&photons[0], &photons[nLookup]);
-            maxDistSquared = photons[0].distanceSquared;
-        }
-    }
-    else {
-        // Remove most distant photon from heap and add new photon
-        std::pop_heap(&photons[0], &photons[nLookup]);
-        photons[nLookup-1] = ClosePhoton(&photon, distSquared);
-        std::push_heap(&photons[0], &photons[nLookup]);
-        maxDistSquared = photons[0].distanceSquared;
-    }
-}
 #endif //PHOTON_DEFINED
 
 /* Copied from photonmap.cpp */
@@ -97,6 +72,18 @@ public:
 	float stepSize;
 };
 
+/* Copied from photonmap.cpp */
+inline bool unsuccessful(uint32_t needed, uint32_t found, uint32_t shot)
+{
+    return (found < needed && (found == 0 || found < shot / 1024));
+}
+
+/* Copied from photonmap.cpp */
+inline float kernel(const Photon *photon, const Point &p, float maxDist2)
+{
+    float s = (1.f - DistanceSquared(photon->p, p) / maxDist2);
+    return 3.f * INV_PI * s * s;
+}
 
 /* Modified from photonmap.cpp */
 Spectrum LVolumePhoton(KdTree<Photon> *map, int nPaths, int nLookup,
@@ -286,12 +273,14 @@ void VolumePhotonIntegrator::Preprocess(const Scene *scene,
 	if (volumetricPhotons.size()) volumeMap = new KdTree<Photon>(volumetricPhotons);
 }
 
+#define RAY_EPSILON 0.00001
+
 /* Modified from photonmap.cpp */
 void VolumePhotonShootingTask::Run() {
     // Declare local variables for _PhotonShootingTask_
     MemoryArena arena;
     RNG rng(31 * taskNum);
-    vector<Photon> localVolumePhotons, localIndirectPhotons, localCausticPhotons;
+    vector<Photon> localVolumePhotons;
     uint32_t totalPaths = 0;
     bool volumeDone = (integrator->nVolumePhotonsWanted == 0);
     PermutedHalton halton(6, rng);
@@ -318,7 +307,68 @@ void VolumePhotonShootingTask::Run() {
             if (pdf == 0.f || Le.IsBlack()) continue;
             Spectrum alpha = (AbsDot(Nl, photonRay.d) * Le) / (pdf * lightPdf);
             if (!alpha.IsBlack()) {
-				//DSFSFDFSDFDF
+				
+                // check for intersection with volume
+                float t0, t1;
+                if (!volumeRegion->IntersectP(photonRay, &t0, &t1)) continue;
+                if (t0 > photonRay.mint + RAY_EPSILON) {
+                    photonRay = RayDifferential(photonRay(t0), photonRay.d, photonRay, RAY_EPSILON, INFINITY);
+                }
+                
+                bool photonDead = false;
+                bool scatteredPhoton = false;
+                int numBounces = 0;
+                
+                // bounce photon
+                while (!photonDead && numBounces <= integrator->maxPhotonDepth &&
+                       volumeRegion->IntersectP(photonRay, &t0, &t1))
+                {
+                    photonRay.mint = t0;
+                    photonRay.maxt = t0;
+                    photonRay.d = Normalize(photonRay.d);
+                    
+                    Spectrum sigma_t = volumeRegion->sigma_t(photonRay(t0), photonRay.d, stepSize);
+                    Spectrum sigma_s = volumeRegion->sigma_s(photonRay(t0), photonRay.d, stepSize);
+                    
+                    float avgSigmaT = (sigma_t.x() + sigma_t.y() + sigma_t.z()) / 3;
+					float avgSigmaS = (sigma_s.x() + sigma_s.y() + sigma_s.z()) / 3;
+					float albedo = avgSigmaS / avgSigmaT;
+                    
+                    float rt0 = t0;
+                    float rt1 = t1;
+                    float totalT = 0.0f;
+                    float avgDist = 0.0f;
+                    int count = 1;
+                    float randNum = (float)rand()/(float)RAND_MAX;
+                    
+                    while(rt0 < rt1){
+                        totalT += volumeRegion->sigma_t(photonRay(rt0), -photonRay.d, 0.1f).y();
+                        float avgT = totalT / float(count);
+                        avgDist = -1 * log(randNum)/avgT;
+							
+                        rt0 += stepSize;
+                        count++;
+							
+                        if(avgDist > rt0)
+                            break;
+                    }
+                    avgDist *= stepSize;
+                    
+                    // break if point is previous intersection or outside volume
+                    if (avgDist < RAY_EPSILON || avgDist > (t1 - t0))
+                        break;
+                    
+                    photonRay.maxt += avgDist;
+                    Intersection surfaceIntersection;
+                    
+                    if (scene->Intersect(photonRay, &surfaceIntersection)) {
+                        Vector diff = photonRay.o - surfaceIntersection.dg.p;
+                        float surfaceIntersectionTime = diff.Length();
+                    }
+                    
+                    Point interactionPoint = photonRay(t0 + avgDist);
+                }
+                
             }
             arena.FreeAll();
         }
@@ -331,7 +381,7 @@ void VolumePhotonShootingTask::Run() {
             return;
         if (nshot > 500000 &&
             (unsuccessful(integrator->nVolumePhotonsWanted,
-                                      volumePhotons.size(), blockSize)))
+                          volumePhotons.size(), blockSize))) {
             Error("Unable to store enough volume photons.  Giving up.\n");
             volumePhotons.erase(volumePhotons.begin(), volumePhotons.end());
             abortTasks = true;
@@ -346,13 +396,34 @@ void VolumePhotonShootingTask::Run() {
                 volumePhotons.push_back(localVolumePhotons[i]);
             if (volumePhotons.size() >= integrator->nVolumePhotonsWanted)
                 volumeDone = true;
-            localVolumePhotons.erase(localDirectPhotons.begin(),
-                                     localDirectPhotons.end());
+            localVolumePhotons.erase(localVolumePhotons.begin(),
+                                     localVolumePhotons.end());
         }
 
         // Exit task if enough photons have been found
         if (volumeDone)
             break;
     }
+}
+
+VolumePhotonIntegrator *CreateVolumePhotonMapSurfaceIntegrator(const ParamSet &params) {
+    int nVolume = params.FindOneInt("volumephotons", 50000);
+    int nUsed = params.FindOneInt("nused", 100);
+    int maxSpecularDepth = params.FindOneInt("maxspeculardepth", 5);
+    int maxPhotonDepth = params.FindOneInt("maxphotondepth", 5);
+    bool finalGather = params.FindOneBool("finalgather", true);
+    int gatherSamples = params.FindOneInt("finalgathersamples", 32);
+    float maxDist = params.FindOneFloat("maxdist", .1f);
+    float gatherAngle = params.FindOneFloat("gatherangle", 10.f);
+    float causticScale = params.FindOneFloat("scalefactor", 0.5);
+	float stepSize = params.FindOneFloat("stepsize", 0.1f);
+    
+    if (PbrtOptions.quickRender) nVolume = nVolume / 10;
+    if (PbrtOptions.quickRender) nUsed = max(1, nUsed / 10);
+    if (PbrtOptions.quickRender) gatherSamples = max(1, gatherSamples / 4);
+    
+    return new VolumePhotonIntegrator(nVolume, nUsed, maxSpecularDepth, maxPhotonDepth, maxDist,
+                                      finalGather, gatherSamples, gatherAngle,
+                                      stepSize, causticScale);
 }
 

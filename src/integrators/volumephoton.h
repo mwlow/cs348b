@@ -57,7 +57,7 @@ private:
 	KdTree<Photon> *volumeMap;
 };
 
-//VolumePhotonIntegrator *CreateVolumePhotonMapSurfaceIntegrator(const ParamSet &params);
+VolumePhotonIntegrator *CreateVolumePhotonMapSurfaceIntegrator(const ParamSet &params);
 
 
 #endif //VOLUMEPHOTON_H

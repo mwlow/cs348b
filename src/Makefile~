@@ -18,10 +18,10 @@ HAVE_DTRACE=0
 DEFS=-DPBRT_HAS_OPENEXR
 
 # 32 bit
-#MARCH=-m32 -msse2 -mfpmath=sse
+MARCH=-m32 -msse2 -mfpmath=sse
 
 # 64 bit
-MARCH=-m64
+#MARCH=-m64
 
 # change this to -g3 for debug builds
 OPT=-O2
