@@ -312,7 +312,7 @@ void VolumePhotonShootingTask::Run() {
                 float t0, t1;
                 if (!volumeRegion->IntersectP(photonRay, &t0, &t1)) continue;
                 if (t0 > photonRay.mint + RAY_EPSILON) {
-                    photonRay = RayDifferential(photonRay(t0), photonRay.d, photonRay, RAY_EPSILON, INFINITY);
+                    photonRay = RayDifferential(photonRay(t0), photonRay.d, photonRay, RAY_EPSILON);
                 }
                 
                 bool photonDead = false;
@@ -327,24 +327,17 @@ void VolumePhotonShootingTask::Run() {
                     photonRay.maxt = t0;
                     photonRay.d = Normalize(photonRay.d);
                     
-                    Spectrum sigma_t = volumeRegion->sigma_t(photonRay(t0), photonRay.d, stepSize);
-                    Spectrum sigma_s = volumeRegion->sigma_s(photonRay(t0), photonRay.d, stepSize);
-                    
-                    float avgSigmaT = (sigma_t.x() + sigma_t.y() + sigma_t.z()) / 3;
-					float avgSigmaS = (sigma_s.x() + sigma_s.y() + sigma_s.z()) / 3;
-					float albedo = avgSigmaS / avgSigmaT;
-                    
+                    // ray march
                     float rt0 = t0;
                     float rt1 = t1;
                     float totalT = 0.0f;
                     float avgDist = 0.0f;
                     int count = 1;
                     float randNum = (float)rand()/(float)RAND_MAX;
-                    
                     while(rt0 < rt1){
-                        totalT += volumeRegion->sigma_t(photonRay(rt0), -photonRay.d, 0.1f).y();
+                        totalT += volumeRegion->sigma_t(photonRay(rt0), -photonRay.d, stepSize).y();
                         float avgT = totalT / float(count);
-                        avgDist = -1 * log(randNum)/avgT;
+                        avgDist = -1 * log(randNum) / avgT;
 							
                         rt0 += stepSize;
                         count++;
@@ -359,14 +352,74 @@ void VolumePhotonShootingTask::Run() {
                         break;
                     
                     photonRay.maxt += avgDist;
-                    Intersection surfaceIntersection;
                     
+                    // check for a surface intersection
+                    Intersection surfaceIntersection;
                     if (scene->Intersect(photonRay, &surfaceIntersection)) {
                         Vector diff = photonRay.o - surfaceIntersection.dg.p;
                         float surfaceIntersectionTime = diff.Length();
+                        // if intersection is close enough to current ray segment
+                        if (surfaceIntersectionTime < (t0 + avgDist)) {
+                            // sample the BSDF of the surface
+                            Vector wo = -photonRay.d;
+                            Vector wi;
+                            BSDF *bsdf = surfaceIntersection.GetBSDF(photonRay, arena);
+                            float pdf;
+                            BxDFType flags;
+                            Spectrum fr = bsdf->Sample_f(wo, &wi, BSDFSample(rng), &pdf, BSDF_ALL, &flags);
+                            if (fr.IsBlack() || pdf == 0.0f)
+                                break;
+                            
+                            // russian roulette
+                            Spectrum alphaNew = alpha * fr * AbsDot(wi, bsdf->dgShading.nn) / pdf;
+                            float continueProb = min(1.0f, alphaNew.y() / alpha.y());
+                            if (rng.RandomFloat() > continueProb)
+                                break;
+                            // scale by probability
+                            alpha = alphaNew / continueProb;
+                            
+                            // update ray
+                            photonRay = RayDifferential(surfaceIntersection.dg.p, wi, photonRay, surfaceIntersection.rayEpsilon);
+                            numBounces++;
+                            
+                            scatteredPhoton = true;
+                            continue;
+                        }
                     }
                     
-                    Point interactionPoint = photonRay(t0 + avgDist);
+                    Point nextInteractionPoint = photonRay(t0 + avgDist);
+                    if (scatteredPhoton) {
+                        Photon vp(nextInteractionPoint, alpha, -photonRay.d);
+                        localVolumePhotons.push_back(vp);
+                    }
+                    
+                    // get scattering properties
+                    float sigmaT = volumeRegion->sigma_t(photonRay(t0), photonRay.d, stepSize).y();
+					float sigmaS = volumeRegion->sigma_s(photonRay(t0), photonRay.d, stepSize).y();
+					float albedo = sigmaS / sigmaT;
+                    // russian roulette again
+                    randNum = ((float)rand()) / (float)RAND_MAX;
+					if (randNum < albedo) {
+						
+						randNum = ((float)rand()) / (float)RAND_MAX;
+                        
+						float g = 0.0f;
+						if (volumeRegion)
+							g = 20.0f;
+						
+						float u1 = ((float)rand()) / (float)RAND_MAX;
+						float u2 = ((float)rand()) / (float)RAND_MAX;
+                        
+						Vector newDirection = SampleHG(photonRay.d, g, u1, u2);
+						newDirection = Normalize(newDirection);
+						photonRay = RayDifferential(nextInteractionPoint, newDirection, photonRay, RAY_EPSILON);
+					}
+					else{
+						photonDead = true;
+						break;
+					}
+					numBounces++;
+					scatteredPhoton = true;
                 }
                 
             }
