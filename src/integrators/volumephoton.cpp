@@ -1,47 +1,358 @@
 #include "stdafx.h"
-#include "integrators/volumephoton.h"
+#include "integrators/volumephotonmap.h"
+#include "scene.h"
+#include "montecarlo.h"
+#include "sampler.h"
+#include "progressreporter.h"
+#include "intersection.h"
 #include "paramset.h"
+#include "camera.h"
 
-VolumePhotonIntegrator::VolumePhotonIntegrator(int nvol, int nLookup, 
-		int maxspecdepth, int maxphotondepth, float maxdist, 
-		bool finalGather, int gatherSamples, float ga, float ss)
-		: nVolumePhotonsWanted(nvol)
-		, nLookup(nLookup)
-		, maxSpecularDepth(maxspecdepth)
-		, maxPhotonDepth(maxphotondepth)
-		, maxDistSquared(maxdist * maxdist)
-		, finalGather(finalGather)
-		, gatherSamples(gatherSamples)
-		, cosGatherAngle(cos(Radians(ga)))
-		, stepSize(ss)
+
+#ifndef PHOTON_DEFINED
+struct Photon {
+    Photon(const Point &pp, const Spectrum &wt, const Vector &w)
+        : p(pp), alpha(wt), wi(w) { }
+    Photon() { }
+    Point p;
+    Spectrum alpha;
+    Vector wi;
+};
+
+struct PhotonProcess {
+    // PhotonProcess Public Methods
+    PhotonProcess(uint32_t mp, ClosePhoton *buf);
+    void operator()(const Point &p, const Photon &photon, float dist2,
+         float &maxDistSquared);
+    ClosePhoton *photons;
+    uint32_t nLookup, nFound;
+};
+
+
+struct ClosePhoton {
+    // ClosePhoton Public Methods
+    ClosePhoton(const Photon *p = NULL, float md2 = INFINITY)
+        : photon(p), distanceSquared(md2) { }
+    bool operator<(const ClosePhoton &p2) const {
+        return distanceSquared == p2.distanceSquared ?
+            (photon < p2.photon) : (distanceSquared < p2.distanceSquared);
+    }
+    const Photon *photon;
+    float distanceSquared;
+};
+
+PhotonProcess::PhotonProcess(uint32_t mp, ClosePhoton *buf) {
+    photons = buf;
+    nLookup = mp;
+    nFound = 0;
+}
+
+inline void PhotonProcess::operator()(const Point &p,
+        const Photon &photon, float distSquared, float &maxDistSquared) {
+    if (nFound < nLookup) {
+        // Add photon to unordered array of photons
+        photons[nFound++] = ClosePhoton(&photon, distSquared);
+        if (nFound == nLookup) {
+            std::make_heap(&photons[0], &photons[nLookup]);
+            maxDistSquared = photons[0].distanceSquared;
+        }
+    }
+    else {
+        // Remove most distant photon from heap and add new photon
+        std::pop_heap(&photons[0], &photons[nLookup]);
+        photons[nLookup-1] = ClosePhoton(&photon, distSquared);
+        std::push_heap(&photons[0], &photons[nLookup]);
+        maxDistSquared = photons[0].distanceSquared;
+    }
+}
+#endif //PHOTON_DEFINED
+
+/* Copied from photonmap.cpp */
+class VolumePhotonShootingTask : public Task {
+public:
+    VolumePhotonShootingTask(int tn, float ti, Mutex &m, VolumePhotonIntegrator *in,
+        ProgressReporter &prog, bool &at, int &ndp,
+        vector<Photon> &volume, vector<Spectrum> &rpR, vector<Spectrum> &rpT,
+		uint32_t &ns, Distribution1D *distrib, const Scene *sc, const Renderer *sr,
+		float sz)
+    : taskNum(tn), time(ti), mutex(m), integrator(in), progress(prog),
+      abortTasks(at), nDirectPaths(ndp),
+      volumePhotons(volume), rpReflectances(rpR), rpTransmittances(rpT),
+      nshot(ns), lightDistribution(distrib), scene(sc), renderer(sr), stepSize(sz) { }
+    void Run();
+
+    int taskNum;
+    float time;
+    Mutex &mutex;
+    VolumePhotonIntegrator *integrator;
+    ProgressReporter &progress;
+    bool &abortTasks;
+    int &nDirectPaths;
+    vector<Photon> &volumePhotons;
+    vector<Spectrum> &rpReflectances, &rpTransmittances;
+    uint32_t &nshot;
+    const Distribution1D *lightDistribution;
+    const Scene *scene;
+    const Renderer *renderer;
+	float stepSize;
+};
+
+
+/* Modified from photonmap.cpp */
+Spectrum LVolumePhoton(KdTree<Photon> *map, int nPaths, int nLookup,
+		ClosePhoton *lookupBuf, VolumeRegion *vr, const Point &isect, 
+		const Vector &wo, float maxDist2)
 {
+	// From LPhoton
+	Spectrum L(0.);
+	PhotonProcess proc(nLookup, lookupBuf);
+	map->Lookup(isect, proc, maxDist2);
+	if (!proc.nFound) return Spectrum(0.);
+
+	ClosePhoton *photons = proc.photons;
+	int nFound = proc.nFound;
+	for (int i = 0; i < nFound; ++i) {
+		const Photon *p = photons[i].photon;
+		L += vr->p(isect, p->wi, wo, 0.1f) * p->alpha;
+	}
+	
+	// From EPhoton
+	return L / (4. / 3. * M_PI * nPaths * pow(maxDist2, 1.5));
+}
+
+
+
+VolumePhotonIntegrator::VolumePhotonIntegrator(int nvol, int nL, 
+		int mspecdepth, int mphotondepth, float mdist, 
+		bool fG, int gS, float ga, float ss, float cs)
+{
+	nVolumePhotonsWanted = nvol;
+	nLookup = nL;
+	maxSpecularDepth = mspecdepth;
+	maxPhotonDepth = mphotondepth;
+	maxDistSquared = pow(mdist, 2);
+	finalGather = fG;
+	cosGatherAngle = cos(Radians(ga));
+	stepSize = ss;
+	causticScale = cs;
+	nVolumePaths = 0;
+	volumeMap = NULL;
 }
 
 VolumePhotonIntegrator::~VolumePhotonIntegrator()
 {
+	delete volumeMap;
 }
 
+/* From single.cpp */
 void VolumePhotonIntegrator::RequestSamples(Sampler *sampler,
 		Sample *sample, const Scene *scene)
 {
+	tauSampleOffset = sample->Add1D(1);
+    scatterSampleOffset = sample->Add1D(1);
 }
 
-Spectrum VolumePhotonIntegrator::Li(const Scene *scene, 
-		const Renderer *renderer, const RayDifferential &ray, 
-		const Sample *sample, RNG &rng, Spectrum *transmittance, 
-		MemoryArena &arena) const
+/* From single.cpp */
+Spectrum VolumePhotonIntegrator::Li(const Scene *scene, const Renderer *renderer,
+        const RayDifferential &ray, const Sample *sample, RNG &rng,
+        Spectrum *T, MemoryArena &arena) const
 {
-	return 0.f;
+	VolumeRegion *vr = scene->volumeRegion;
+    float t0, t1;
+    if (!vr || !vr->IntersectP(ray, &t0, &t1) || (t1-t0) == 0.f) {
+        *T = 1.f;
+        return 0.f;
+    }
+    // Do single scattering volume integration in _vr_
+    Spectrum Lv(0.);
+
+    // Prepare for volume integration stepping
+    int nSamples = Ceil2Int((t1-t0) / stepSize);
+    float step = (t1 - t0) / nSamples;
+    Spectrum Tr(1.f);
+    Point p = ray(t0), pPrev;
+    Vector w = -ray.d;
+    t0 += sample->oneD[scatterSampleOffset][0] * step;
+
+    // Compute sample patterns for single scattering samples
+    float *lightNum = arena.Alloc<float>(nSamples);
+    LDShuffleScrambled1D(1, nSamples, lightNum, rng);
+    float *lightComp = arena.Alloc<float>(nSamples);
+    LDShuffleScrambled1D(1, nSamples, lightComp, rng);
+    float *lightPos = arena.Alloc<float>(2*nSamples);
+    LDShuffleScrambled2D(1, nSamples, lightPos, rng);
+    uint32_t sampOffset = 0;
+    for (int i = 0; i < nSamples; ++i, t0 += step) {
+        // Advance to sample at _t0_ and update _T_
+        pPrev = p;
+        p = ray(t0);
+        Ray tauRay(pPrev, p - pPrev, 0.f, 1.f, ray.time, ray.depth);
+        Spectrum stepTau = vr->tau(tauRay,
+                                   .5f * stepSize, rng.RandomFloat());
+        Tr *= Exp(-stepTau);
+
+        // Possibly terminate ray marching if transmittance is small
+        if (Tr.y() < 1e-3) {
+            const float continueProb = .5f;
+            if (rng.RandomFloat() > continueProb) break;
+            Tr /= continueProb;
+        }
+
+        // Compute single-scattering source term at _p_
+        Lv += Tr * vr->Lve(p, w, ray.time);
+        Spectrum ss = vr->sigma_s(p, w, ray.time);
+        if (!ss.IsBlack() && scene->lights.size() > 0) {
+            int nLights = scene->lights.size();
+            int ln = min(Floor2Int(lightNum[sampOffset] * nLights),
+                         nLights-1);
+            Light *light = scene->lights[ln];
+            // Add contribution of _light_ due to scattering at _p_
+            float pdf;
+            VisibilityTester vis;
+            Vector wo;
+            LightSample ls(lightComp[sampOffset], lightPos[2*sampOffset],
+                           lightPos[2*sampOffset+1]);
+            Spectrum L = light->Sample_L(p, 0.f, ls, ray.time, &wo, &pdf, &vis);
+            
+            if (!L.IsBlack() && pdf > 0.f && vis.Unoccluded(scene)) {
+                Spectrum Ld = L * vis.Transmittance(scene, renderer, NULL, rng, arena);
+                Lv += Tr * ss * vr->p(p, w, -wo, ray.time) * Ld * float(nLights) /
+                        pdf;
+            }
+			
+			// From photonmap.cpp (using LVolumePhoton)
+			ClosePhoton *lookupBuf = arena.Alloc<ClosePhoton>(nLookup);
+			Lv += LVolumePhoton(volumeMap, nVolumePaths, nLookup, lookupBuf, vr, p, w, maxDistSquared);
+
+        }
+        ++sampOffset;
+    }
+    *T = Tr;
+    return Lv * step * causticScale;
 }
 
+/* From single.cpp */
 Spectrum VolumePhotonIntegrator::Transmittance(const Scene *scene, 
 		const Renderer *, const RayDifferential &ray, 
 		const Sample *sample, RNG &rng, MemoryArena &arena) const
 {
-	return 0.f;
+	if (!scene->volumeRegion) return Spectrum(1.f);
+    float step, offset;
+    if (sample) {
+        step = stepSize;
+        offset = sample->oneD[tauSampleOffset][0];
+    }
+    else {
+        step = 4.f * stepSize;
+        offset = rng.RandomFloat();
+    }
+    Spectrum tau = scene->volumeRegion->tau(ray, step, offset);
+    return Exp(-tau);
 }
 
+/* Modified from photonmap.cpp */
 void VolumePhotonIntegrator::Preprocess(const Scene *scene, 
 		const Camera *camera, const Renderer *renderer)
 {
+	if (scene->lights.size() == 0) return;
+    // Declare shared variables for photon shooting
+    Mutex *mutex = Mutex::Create();
+    int nDirectPaths = 0;
+    vector<Photon> volumetricPhotons;
+    bool abortTasks = false;
+    volumetricPhotons.reserve(nVolumePhotonsWanted);
+    uint32_t nshot = 0;
+    vector<Spectrum> rpReflectances, rpTransmittances;
+
+    // Compute light power CDF for photon shooting
+    Distribution1D *lightDistribution = ComputeLightSamplingCDF(scene);
+
+    // Run parallel tasks for photon shooting
+    ProgressReporter progress(nVolumePhotonsWanted, "Shooting volume photons");
+    vector<Task *> photonShootingTasks;
+    int nTasks = NumSystemCores();
+    for (int i = 0; i < nTasks; ++i)
+        photonShootingTasks.push_back(new VolumePhotonShootingTask(
+            i, camera ? camera->shutterOpen : 0.f, *mutex, this, progress, abortTasks, nDirectPaths,
+            volumetricPhotons, rpReflectances, rpTransmittances, nshot, lightDistribution,
+			scene, renderer, stepSize));
+    EnqueueTasks(photonShootingTasks);
+    WaitForAllTasks();
+    for (uint32_t i = 0; i < photonShootingTasks.size(); ++i)
+        delete photonShootingTasks[i];
+    Mutex::Destroy(mutex);
+    progress.Done();
+
+	if (volumetricPhotons.size()) volumeMap = new KdTree<Photon>(volumetricPhotons);
 }
+
+/* Modified from photonmap.cpp */
+void VolumePhotonShootingTask::Run() {
+    // Declare local variables for _PhotonShootingTask_
+    MemoryArena arena;
+    RNG rng(31 * taskNum);
+    vector<Photon> localVolumePhotons, localIndirectPhotons, localCausticPhotons;
+    uint32_t totalPaths = 0;
+    bool volumeDone = (integrator->nVolumePhotonsWanted == 0);
+    PermutedHalton halton(6, rng);
+    vector<Spectrum> localRpReflectances, localRpTransmittances;
+	VolumeRegion *volumeRegion = scene->volumeRegion;
+    while (true) {
+        // Follow photon paths for a block of samples
+        const uint32_t blockSize = 1024;
+        for (uint32_t i = 0; i < blockSize; ++i) {
+            float u[6];
+            halton.Sample(++totalPaths, u);
+            // Choose light to shoot photon from
+            float lightPdf;
+            int lightNum = lightDistribution->SampleDiscrete(u[0], &lightPdf);
+            const Light *light = scene->lights[lightNum];
+
+            // Generate _photonRay_ from light source and initialize _alpha_
+            RayDifferential photonRay;
+            float pdf;
+            LightSample ls(u[1], u[2], u[3]);
+            Normal Nl;
+            Spectrum Le = light->Sample_L(scene, ls, u[4], u[5],
+                                          time, &photonRay, &Nl, &pdf);
+            if (pdf == 0.f || Le.IsBlack()) continue;
+            Spectrum alpha = (AbsDot(Nl, photonRay.d) * Le) / (pdf * lightPdf);
+            if (!alpha.IsBlack()) {
+				//DSFSFDFSDFDF
+            }
+            arena.FreeAll();
+        }
+
+        // Merge local photon data with data in _PhotonIntegrator_
+        MutexLock lock(mutex);
+
+        // Give up if we're not storing enough photons
+        if (abortTasks)
+            return;
+        if (nshot > 500000 &&
+            (unsuccessful(integrator->nVolumePhotonsWanted,
+                                      volumePhotons.size(), blockSize)))
+            Error("Unable to store enough volume photons.  Giving up.\n");
+            volumePhotons.erase(volumePhotons.begin(), volumePhotons.end());
+            abortTasks = true;
+            return;
+        }
+        progress.Update(localVolumePhotons.size());
+        nshot += blockSize;
+
+        if (!volumeDone) {
+            integrator->nVolumePaths += blockSize;
+            for (uint32_t i = 0; i < localVolumePhotons.size(); ++i)
+                volumePhotons.push_back(localVolumePhotons[i]);
+            if (volumePhotons.size() >= integrator->nVolumePhotonsWanted)
+                volumeDone = true;
+            localVolumePhotons.erase(localDirectPhotons.begin(),
+                                     localDirectPhotons.end());
+        }
+
+        // Exit task if enough photons have been found
+        if (volumeDone)
+            break;
+    }
+}
+

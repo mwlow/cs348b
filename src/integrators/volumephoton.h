@@ -9,19 +9,28 @@
 #include "integrator.h"
 #include "kdtree.h"
 
+
+#ifndef PHOTON_DEFINED
+struct Photon;
+struct ClosePhoton;
+struct PhotonProcess;
+#endif //PHOTON_DEFINED
+
+
 class VolumePhotonIntegrator : public VolumeIntegrator
 {
 public:
-	VolumePhotonIntegrator(int nvol, int nLookup, int maxspecdepth,
-		int maxphotondepth, float maxdist, bool finalGather, 
-		int gatherSamples, float ga, float ss);
+	VolumePhotonIntegrator(int nvol, int nL, int mspecdepth, int mphotondepth,
+		float mdist, bool fG, int gS, float ga, float ss, float cs)
+
 	~VolumePhotonIntegrator();
 
 	void RequestSamples(Sampler *sampler, Sample *sample, const Scene *scene);
-    Spectrum Li(const Scene *scene, const Renderer *renderer,
-            const RayDifferential &ray, const Sample *sample, RNG &rng,
-            Spectrum *transmittance, MemoryArena &arena) const;
-    
+
+    Spectrum VolumePhotonIntegrator::Li(const Scene *scene, const Renderer *renderer,
+        const RayDifferential &ray, const Sample *sample, RNG &rng,
+        Spectrum *T, MemoryArena &arena) const;
+
 	Spectrum Transmittance(const Scene *scene, const Renderer *,
             const RayDifferential &ray, const Sample *sample, RNG &rng,
             MemoryArena &arena) const;
@@ -42,7 +51,10 @@ private:
 	float stepSize;
 	int tauSampleOffset, scatterSampleOffset;
 
-	//KdTree<Photon> *volumeMap;
+	float causticScale;
+
+	int nVolumePaths;
+	KdTree<Photon> *volumeMap;
 };
 
 //VolumePhotonIntegrator *CreateVolumePhotonMapSurfaceIntegrator(const ParamSet &params);
